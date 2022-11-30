@@ -37,14 +37,18 @@ logic neg_f;
 logic ov_f;
 logic sov_f;
 logic carry_in_ultimo_bit;
+logic [15:0] rf[4] = '{default : 'd0};
 
 always_ff @(posedge clk) begin : ir_ctrl
     if(ir_enable)
         instruction <=  data_in;
 end
 
-always_ff @(posedge clk) begin  : pc_ctrl
-    if(pc_enable) begin
+always_ff @(posedge clk or negedge rst_n) begin  : pc_ctrl
+    if(!rst_n) begin
+        program_counter<='d0;
+        end
+    else if(pc_enable) begin
         if(branch)
             program_counter <=  mem_addr;
         else
@@ -72,10 +76,108 @@ always_comb begin : ula_ctrl
             carry_in_ultimo_bit=1'b0;
         end
         default: begin
+         {carry_in_ultimo_bit,alu_out[14:0]} = ~bus_a[14:0] + bus_b[14:0] + 1;
+           {ov_f, alu_out[15]} = ~bus_a[15]+bus_b[15]+carry_in_ultimo_bit;
+           sov_f = ov_f ^ carry_in_ultimo_bit;
+        
         end
     endcase
 end
 
 assign zero_f=~|(alu_out); //reduçao em NOR
 assign neg_f =alu_out[15]; //bit sinal
+assign bus_c = (c_sel?data_in:alu_out);
+assign ram_addr = (addr_sel?mem_addr:program_counter);
+
+always_comb begin:decoder
+a_addr='d0;
+b_addr='d0;
+c_addr='d0;
+mem_addr='d0;
+
+case(instruction[15:8])
+8'b1000_0001:begin //load
+decoded_instruction=I_LOAD;
+c_addr=instruction[6:5];
+mem_addr=instruction[4:0];
+end
+8'b1000_0010:begin // store
+decoded_instruction=I_STORE;
+a_addr=instruction[6:5];
+mem_addr=instruction[4:0];
+end
+8'b1001_0001:begin // move
+decoded_instruction=I_MOVE;
+c_addr=instruction[3:2];
+a_addr=instruction[1:0];
+b_addr=instruction[1:0];
+end
+8'b1010_0001:begin //add
+decoded_instruction=I_ADD;
+a_addr=instruction[1:0];
+b_addr=instruction[3:2];
+c_addr=instruction[5:4];
+end
+8'b1010_0010:begin //sub
+decoded_instruction=I_SUB;
+a_addr=instruction[1:0];
+b_addr=instruction[3:2];
+c_addr=instruction[5:4];
+end
+8'b1010_0011:begin //and
+decoded_instruction=I_AND;
+a_addr=instruction[1:0];
+b_addr=instruction[3:2];
+c_addr=instruction[5:4];
+end
+8'b1010_0100:begin //or
+decoded_instruction=I_OR;
+a_addr=instruction[1:0];
+b_addr=instruction[3:2];
+c_addr=instruction[5:4];
+end
+8'b0000_0001:begin //branch
+decoded_instruction=I_BRANCH;
+mem_addr=instruction[4:0];
+end
+8'b0000_0010:begin //bzero
+decoded_instruction=I_BZERO;
+mem_addr=instruction[4:0];
+end 
+8'b0000_0011:begin //bneg
+decoded_instruction=I_BNEG;
+mem_addr=instruction[4:0];
+end
+8'b0000_0101:begin //bov
+decoded_instruction=I_BOV;
+mem_addr=instruction[4:0];
+end
+8'b0000_0110:begin //bnov
+decoded_instruction=I_BNOV;
+mem_addr=instruction[4:0];
+end
+8'b0000_1010:begin //bnneg
+decoded_instruction=I_BNNEG;
+mem_addr=instruction[4:0];
+end
+8'b0000_1011:begin //bnzero
+decoded_instruction=I_BNZERO;
+mem_addr=instruction[4:0];
+end
+8'b1111_1111:begin //halt
+decoded_instruction=I_HALT;
+end
+
+default :begin//nop
+decoded_instruction=I_NOP;
+end
+endcase
+end
+
+always_ff @(posedge clk) begin : rf_ctrl
+    if (write_reg_enable)
+        rf[c_addr] <= bus_c;
+end
+assign bus_a = rf[a_addr];
+assign bus_b = rf[b_addr]; 
 endmodule : data_path
